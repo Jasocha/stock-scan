@@ -370,14 +370,22 @@ function startScanning(){
   readerWrap.classList.add('active');
   camStatus.textContent = 'Starting camera…';
   codeReader = new ZXing.BrowserMultiFormatReader(null, 300);
+  var decodeCb = function(result){
+    if (result) onDecoded(result.getText());
+    /* decode errors fire on every frame with no match found: ignore */
+  };
   codeReader.decodeFromConstraints(
-    { video: { facingMode: { ideal: 'environment' } } },
+    { video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1080 }, focusMode: { ideal: 'continuous' } } },
     'reader',
-    function(result){
-      if (result) onDecoded(result.getText());
-      /* decode errors fire on every frame with no match found: ignore */
-    }
-  ).then(function(){
+    decodeCb
+  ).catch(function(){
+    /* high-res / focusMode request not supported on this device: retry with a plain constraint */
+    return codeReader.decodeFromConstraints(
+      { video: { facingMode: 'environment' } },
+      'reader',
+      decodeCb
+    );
+  }).then(function(){
     scanning = true;
     camStatus.textContent = 'Camera live';
     camStatus.classList.add('live');
