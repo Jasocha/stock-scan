@@ -1,0 +1,472 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
+<title>Ja.Socha Stock Scan</title>
+<style>
+/* Layout: sticky header (counter + scan toggle) over a scrollable running list, sticky footer submit bar */
+:root{
+  --bg:#FAF7F2; --surface:#FFFFFF; --fg:#201C18; --muted:#8A8178; --line:#E6DFD3;
+  --accent:#1F3D2E; --accent-fg:#FFFFFF; --accent-soft:#E7EEE9;
+  --danger:#B3432B; --danger-soft:#F6E6E1;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#15120F; --surface:#1E1A16; --fg:#F2ECE3; --muted:#A79C8C; --line:#332C24;
+    --accent:#6FA98A; --accent-fg:#13241B; --accent-soft:#233B30;
+    --danger:#E08567; --danger-soft:#3A241D;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#15120F; --surface:#1E1A16; --fg:#F2ECE3; --muted:#A79C8C; --line:#332C24;
+  --accent:#6FA98A; --accent-fg:#13241B; --accent-soft:#233B30;
+  --danger:#E08567; --danger-soft:#3A241D;
+  color-scheme: dark;
+}
+*{box-sizing:border-box;}
+html,body{height:100%;}
+body{
+  margin:0; background:var(--bg); color:var(--fg);
+  font:15px/1.4 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  display:flex; flex-direction:column;
+  padding-left:max(16px, env(safe-area-inset-left,0px));
+  padding-right:max(16px, env(safe-area-inset-right,0px));
+}
+.mono{ font-family:"SF Mono",SFMono-Regular,Consolas,"Roboto Mono",monospace; font-variant-numeric:tabular-nums; }
+h1{ font-size:17px; font-weight:700; letter-spacing:.01em; margin:0; }
+.eyebrow{ font-size:11px; font-weight:600; letter-spacing:.08em; text-transform:uppercase; color:var(--muted); }
+
+header{
+  position:sticky; top:env(safe-area-inset-top,0px); z-index:10;
+  background:var(--bg); padding-top:14px; padding-bottom:12px;
+  border-bottom:1px solid var(--line);
+}
+body::before{
+  content:""; position:fixed; inset:0 0 auto; height:env(safe-area-inset-top,0px);
+  z-index:10; background:var(--bg);
+}
+.top-row{ display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:12px; }
+.counter-select{
+  flex:1; min-width:0; appearance:none; -webkit-appearance:none;
+  background:var(--surface) url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="12" height="8"><path d="M1 1l5 5 5-5" stroke="%238A8178" stroke-width="1.6" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>') no-repeat right 14px center;
+  border:1px solid var(--line); border-radius:10px; color:var(--fg);
+  font:inherit; font-weight:600; padding:12px 36px 12px 14px;
+}
+#camStatus{ font-size:12px; color:var(--muted); }
+#camStatus.live{ color:var(--accent); font-weight:600; }
+
+.mode-toggle{
+  display:flex; border:1px solid var(--line); border-radius:10px; overflow:hidden; margin-bottom:12px;
+}
+.mode-toggle button{
+  flex:1; border:none; background:var(--surface); color:var(--muted); font:inherit; font-weight:700; font-size:13px;
+  padding:10px 8px; cursor:pointer;
+}
+.mode-toggle button.active{ background:var(--accent); color:var(--accent-fg); }
+.mode-toggle button[data-mode="stockin"].active{ background:#3A5FA0; color:#fff; }
+
+.scan-btn{
+  width:100%; border:none; border-radius:12px; padding:15px 16px;
+  background:var(--accent); color:var(--accent-fg); font:inherit; font-weight:700; font-size:16px;
+  display:flex; align-items:center; justify-content:center; gap:8px; cursor:pointer;
+}
+.scan-btn.stop{ background:var(--danger); }
+.scan-btn svg{ width:20px; height:20px; flex:none; }
+
+#readerWrap{ margin-top:12px; border-radius:12px; overflow:hidden; border:1px solid var(--line); background:#000; display:none; position:relative; }
+#readerWrap.active{ display:block; }
+#reader{ width:100%; }
+#reader video{ display:block; width:100%; }
+.scan-frame{
+  position:absolute; inset:14%; border:2px solid var(--accent-fg); border-radius:14px;
+  box-shadow:0 0 0 999px rgba(0,0,0,.28); pointer-events:none;
+}
+.flash{ position:absolute; inset:0; background:var(--accent); opacity:0; pointer-events:none; transition:opacity .08s ease; }
+.flash.on{ opacity:.55; }
+
+main{ flex:1; padding-top:14px; padding-bottom:160px; }
+.list-head{ display:flex; align-items:baseline; justify-content:space-between; margin-bottom:10px; }
+.list-head .count{ color:var(--muted); font-size:13px; }
+
+.empty{
+  border:1px dashed var(--line); border-radius:12px; padding:28px 16px; text-align:center;
+  color:var(--muted); font-size:13px; line-height:1.6;
+}
+.empty b{ display:block; color:var(--fg); font-size:14px; margin-bottom:4px; }
+
+.item-row{
+  display:flex; align-items:center; gap:10px; padding:11px 0; border-bottom:1px solid var(--line);
+}
+.item-row:last-child{ border-bottom:none; }
+.item-info{ flex:1; min-width:0; }
+.item-name{ font-weight:600; font-size:14px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.item-sub{ font-size:12px; color:var(--muted); margin-top:1px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.item-sub .barcode{ font-size:11px; }
+.unknown-tag{ display:inline-block; background:var(--danger-soft); color:var(--danger); font-size:10px; font-weight:700; letter-spacing:.04em; text-transform:uppercase; border-radius:5px; padding:2px 5px; margin-left:6px; }
+
+.qty-stepper{ display:flex; align-items:center; gap:0; border:1px solid var(--line); border-radius:9px; overflow:hidden; flex:none; }
+.qty-stepper button{
+  width:30px; height:30px; border:none; background:var(--surface); color:var(--fg); font-size:17px; line-height:1;
+  display:flex; align-items:center; justify-content:center; cursor:pointer;
+}
+.qty-stepper button:active{ background:var(--accent-soft); }
+.qty-val{ width:28px; text-align:center; font-weight:700; font-size:14px; }
+
+.remove-btn{
+  flex:none; width:30px; height:30px; border:none; background:transparent; color:var(--muted);
+  display:flex; align-items:center; justify-content:center; cursor:pointer; border-radius:8px;
+}
+.remove-btn:active{ background:var(--danger-soft); color:var(--danger); }
+
+.manual-add{ margin-top:16px; }
+.manual-add summary{ font-size:12px; color:var(--muted); cursor:pointer; list-style:none; }
+.manual-add summary::-webkit-details-marker{ display:none; }
+.manual-add summary::before{ content:"+ "; color:var(--accent); font-weight:700; }
+.manual-row{ display:flex; gap:8px; margin-top:10px; }
+.manual-row input{
+  flex:1; min-width:0; border:1px solid var(--line); border-radius:9px; background:var(--surface); color:var(--fg);
+  font:inherit; padding:10px 12px;
+}
+.manual-row button{
+  flex:none; border:none; border-radius:9px; background:var(--accent-soft); color:var(--accent); font:inherit; font-weight:700;
+  padding:0 16px; cursor:pointer;
+}
+
+footer{
+  position:fixed; left:0; right:0; bottom:0; z-index:10;
+  padding:12px max(16px, env(safe-area-inset-right,0px)) max(12px, env(safe-area-inset-bottom,0px)) max(16px, env(safe-area-inset-left,0px));
+  background:linear-gradient(to top, var(--bg) 60%, transparent);
+}
+.footer-card{
+  background:var(--surface); border:1px solid var(--line); border-radius:14px; padding:12px 14px;
+  display:flex; align-items:center; gap:12px; box-shadow:0 6px 24px rgba(0,0,0,.12);
+}
+.footer-totals{ flex:1; min-width:0; }
+.footer-totals .n{ font-size:18px; font-weight:800; }
+.footer-totals .l{ font-size:11px; color:var(--muted); text-transform:uppercase; letter-spacing:.06em; }
+.submit-btn{
+  flex:none; border:none; border-radius:10px; padding:12px 20px; background:var(--accent); color:var(--accent-fg);
+  font:inherit; font-weight:700; font-size:14px; cursor:pointer;
+}
+.submit-btn:disabled{ opacity:.45; }
+
+.toast{
+  position:fixed; left:50%; top:calc(env(safe-area-inset-top,0px) + 10px); transform:translate(-50%,-140%);
+  background:var(--fg); color:var(--bg); padding:10px 16px; border-radius:10px; font-size:13px; font-weight:600;
+  z-index:20; transition:transform .25s ease; max-width:calc(100% - 32px); text-align:center;
+}
+.toast.show{ transform:translate(-50%,0); }
+.toast.err{ background:var(--danger); color:#fff; }
+
+@media (prefers-reduced-motion: reduce){ *{ transition:none !important; } }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="top-row">
+    <div>
+      <div class="eyebrow">Ja.Socha</div>
+      <h1>Stock-Out Scan</h1>
+    </div>
+    <span id="camStatus">Camera off</span>
+  </div>
+  <select id="counterSelect" class="counter-select" aria-label="Counter">
+    <option value="" disabled selected>Select counter…</option>
+    <option>Scotts</option>
+    <option>Takashimaya</option>
+    <option>OG PP</option>
+    <option>OG AB</option>
+    <option>KLCC</option>
+    <option>TRX</option>
+    <option>Midvalley</option>
+  </select>
+  <div class="mode-toggle" style="margin-top:12px;" role="group" aria-label="Mode">
+    <button type="button" id="modeSellBtn" data-mode="sell" class="active">Sell (scan out)</button>
+    <button type="button" id="modeStockinBtn" data-mode="stockin">Add Stock (stock count)</button>
+  </div>
+  <div id="readerWrap">
+    <div id="reader"></div>
+    <div class="scan-frame"></div>
+    <div class="flash" id="flash"></div>
+  </div>
+  <div style="margin-top:12px;">
+    <button class="scan-btn" id="scanToggle" type="button" disabled>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 7V5a2 2 0 0 1 2-2h2M21 7V5a2 2 0 0 0-2-2h-2M3 17v2a2 2 0 0 0 2 2h2M21 17v2a2 2 0 0 1-2 2h-2M7 12h10"/></svg>
+      <span id="scanToggleLabel">Select a counter to start</span>
+    </button>
+  </div>
+</header>
+
+<main>
+  <div class="list-head">
+    <strong style="font-size:14px;">Scanned items</strong>
+    <span class="count" id="listCount">0 lines</span>
+  </div>
+  <div id="list"></div>
+  <div class="empty" id="emptyState">
+    <b>Nothing scanned yet</b>
+    <span id="emptyHint">Point the camera at a tag barcode — each scan adds a line below.<br>Sell 20 pieces? Scan all 20, then submit once.</span>
+  </div>
+
+  <details class="manual-add">
+    <summary>Enter a barcode manually</summary>
+    <div class="manual-row">
+      <input type="text" id="manualInput" placeholder="e.g. JS-0819-50065-S" autocapitalize="characters" autocomplete="off">
+      <button type="button" id="manualAddBtn">Add</button>
+    </div>
+  </details>
+</main>
+
+<footer>
+  <div class="footer-card">
+    <div class="footer-totals">
+      <div class="n mono" id="totalQty">0</div>
+      <div class="l">pieces to submit</div>
+    </div>
+    <button class="submit-btn" id="submitBtn" disabled>Submit all</button>
+  </div>
+</footer>
+
+<div class="toast" id="toast"></div>
+
+<script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+<script>
+
+var ITEMS = {"JS-0819-50065-S":["EVOLET","PURPLE GREY","S"],"JS-0819-50065-M":["EVOLET","PURPLE GREY","M"],"JS-0819-50065-L":["EVOLET","PURPLE GREY","L"],"JS-0820-50065-S":["AOKI","BLUE","S"],"JS-0820-50065-M":["AOKI","BLUE","M"],"JS-0820-50065-L":["AOKI","BLUE","L"],"JS-0823-50062-S":["TANAGER ","PRINTED","S"],"JS-0823-50062-M":["TANAGER ","PRINTED","M"],"JS-0823-50062-L":["TANAGER ","PRINTED","L"],"JS-0824-50062-S":["JENNA","WHITE","S"],"JS-0824-50062-M":["JENNA","WHITE","M"],"JS-0824-50062-L":["JENNA","WHITE","L"],"JS-0825-8586-F":["ABEL","WHITE PTINTED","FS"],"JS-0824-8586-F":["ABEL","WHITE PTINTED","FS"],"JS-0829-50161-S":["DENIM","BLUE","S"],"JS-0829-50161-M":["DENIM","BLUE","M"],"JS-0829-50161-L":["DENIM","BLUE","L"],"JS-0830-50161-S":["CHELSEA","GREYISH BLUE","S"],"JS-0830-50161-M":["CHELSEA","GREYISH BLUE","M"],"JS-0830-50161-L":["CHELSEA","GREYISH BLUE","L"],"JS-0831-50161-S":["PHTHALO","NAVY BLUE","S"],"JS-0831-50161-M":["PHTHALO","NAVY BLUE","M"],"JS-0831-50161-L":["PHTHALO","NAVY BLUE","L"],"JS-0832-50133-S":["IVY","PURPLE","S"],"JS-0832-50133-M":["IVY","PURPLE","M"],"JS-0832-50133-L":["IVY","PURPLE","L"],"JS-0833-50133-S":["BLAINN","BLUE","S"],"JS-0833-50133-M":["BLAINN","BLUE","M"],"JS-0833-50133-L":["BLAINN","BLUE","L"],"JS-0834-50133-S":["ANEEZA","GREEN","S"],"JS-0834-50133-M":["ANEEZA","GREEN","M"],"JS-0834-50133-L":["ANEEZA","GREEN","L"],"JS-0835-50179-S":["CAROLINA","BLUE","S"],"JS-0835-50179-M":["CAROLINA","BLUE","M"],"JS-0835-50179-L":["CAROLINA","BLUE","L"],"JS-0836-50179-S":["ESMERALDA","GREEN","S"],"JS-0836-50179-M":["ESMERALDA","GREEN","M"],"JS-0836-50179-L":["ESMERALDA","GREEN","L"],"JS-0837-50060S-S":["CAROLINA","BLUE","S"],"JS-0837-50060S-M":["CAROLINA","BLUE","M"],"JS-0837-50060S-L":["CAROLINA","BLUE","L"],"JS-0838-50060S-S":["ESMERALDA","GREEN","S"],"JS-0838-50060S-M":["ESMERALDA","GREEN","M"],"JS-0838-50060S-L":["ESMERALDA","GREEN","L"],"JS-0839-50178-S":["DWIGHT","WHITE","S"],"JS-0839-50178-M":["DWIGHT","WHITE","M"],"JS-0839-50178-L":["DWIGHT","WHITE","L"],"JS-0840-50178-S":["ADRIANA","BROWN","S"],"JS-0840-50178-M":["ADRIANA","BROWN","M"],"JS-0840-50178-L":["ADRIANA","BROWN","L"],"JS-0845-10808-S":["DIANA","PRINTED","S"],"JS-0845-10808-M":["DIANA","PRINTED","M"],"JS-0845-10808-L":["DIANA","PRINTED","L"],"JS-0849-50180-XS":["KIONA","BROWN","XS"],"JS-0849-50180-S":["KIONA","BROWN","S"],"JS-0849-50180-M":["KIONA","BROWN","L"],"JS-0850-50180-XS":["EDEN","GREEN","XS"],"JS-0850-50180-S":["EDEN","GREEN","S"],"JS-0850-50180-M":["EDEN","GREEN","M"],"JS-0850-50180-L":["EDEN","GREEN","L"],"JS-0852-50162-S":["INAYA","WHITE","S"],"JS-0852-50162-M":["INAYA","WHITE","M"],"JS-0852-50162-L":["INAYA","WHITE","L"],"JS-0853-50007-S":["FELICITY","BLUE","S"],"JS-0853-50007-M":["FELICITY","BLUE","M"],"JS-0853-50007-L":["FELICITY","BLUE","L"],"JS-0854-50007-S":["EUDORA","GREEN","S"],"JS-0854-50007-M":["EUDORA","GREEN","M"],"JS-0854-50007-L":["EUDORA","GREEN","L"],"JS-0860-50210-S":["DESTINY","BLACK","S"],"JS-0860-50210-M":["DESTINY","BLACK","M"],"JS-0860-50210-L":["DESTINY","BLACK","L"],"JS-0861-50201-S":["MILEY","ORANGE","S"],"JS-0861-50201-M":["MILEY","ORANGE","M"],"JS-0861-50201-L":["MILEY","ORANGE","L"],"JS-0862-50201-S":["ANYA","BEIGE","S"],"JS-0862-50201-M":["ANYA","BEIGE","M"],"JS-0862-50201-L":["ANYA","BEIGE","L"],"JS-0863-50220-S":["DALEYZA","MID BLUE","S"],"JS-0863-50220-M":["DALEYZA","MID BLUE","M"],"JS-0863-50220-L":["DALEYZA","MID BLUE","L"],"JS-0864-50220-S":["MACIE","DK BLUE","S"],"JS-0864-50220-M":["MACIE","DK BLUE","M"],"JS-0864-50220-L":["MACIE","DK BLUE","L"],"JS-0865-50212-S":["CATALINA","DENNIM","S"],"JS-0865-50212-M":["CATALINA","DENNIM","M"],"JS-0865-50212-L":["CATALINA","DENNIM","L"],"JS-0867-50151-S":["DENIM MID BLUE","MID BLUE","S"],"JS-0867-50151-M":["DENIM MID BLUE","MID BLUE","M"],"JS-0867-50151-L":["DENIM MID BLUE","MID BLUE","L"],"JS-0867-50151-XL":["DENIM MID BLUE","MID BLUE","XL"],"JS-0868-50151-S":["DENIM LT BLUE","LT BLUE","S"],"JS-0868-50151-M":["DENIM LT BLUE","LT BLUE","M"],"JS-0868-50151-L":["DENIM LT BLUE","LT BLUE","L"],"JS-0868-50151-XL":["DENIM LT BLUE","LT BLUE","XL"],"JS-0869-50008-S":["DENIM MID BLUE","MID BLUE","S"],"JS-0869-50008-M":["DENIM MID BLUE","MID BLUE","M"],"JS-0869-50008-L":["DENIM MID BLUE","MID BLUE","L"],"JS-0870-50008-S":["CALLA","WHITE","S"],"JS-0870-50008-M":["CALLA","WHITE","M"],"JS-0870-50008-L":["CALLA","WHITE","L"],"JS-0871-10308-S":["DENIM MID BLUE","MID BLUE","S"],"JS-0871-10308-M":["DENIM MID BLUE","MID BLUE","M"],"JS-0871-10308-L":["DENIM MID BLUE","MID BLUE","L"],"JS-0872-10308-S":["CARMINE","RED","S"],"JS-0872-10308-M":["CARMINE","RED","M"],"JS-0872-10308-L":["CARMINE","RED","L"],"JS-0873-50016-S":["DENIM MID BLUE S/S","MID BLUE","S"],"JS-0873-50016-M":["DENIM MID BLUE S/S","MID BLUE","M"],"JS-0873-50016-L":["DENIM MID BLUE S/S","MID BLUE","L"],"JS-0875-50213-S":["MILEY","GREEN","S"],"JS-0875-50213-M":["MILEY","GREEN","M"],"JS-0875-50213-L":["MILEY","GREEN","L"],"JS-0876-50196-S":["AYLANI - CAP SLEEVLES","WHITE","S"],"JS-0876-50196-M":["AYLANI - CAP SLEEVLES","WHITE","M"],"JS-0876-50196-L":["AYLANI - CAP SLEEVLES","WHITE","L"],"JS-0877-50196-S":["HALO - CAP SLEEVLES","BLACK","S"],"JS-0877-50196-M":["HALO - CAP SLEEVLES","BLACK","M"],"JS-0877-50196-L":["HALO - CAP SLEEVLES","BLACK","L"],"JS-0878-50197-S":["AYLANI - SHORT SLEEVLES","WHITE","S"],"JS-0878-50197-M":["AYLANI - SHORT SLEEVLES","WHITE","M"],"JS-0878-50197-L":["AYLANI - SHORT SLEEVLES","WHITE","L"],"JS-0879-50197-S":["HALO - SHORT SLEEVLES","BLACK","S"],"JS-0879-50197-M":["HALO - SHORT SLEEVLES","BLACK","M"],"JS-0879-50197-L":["HALO - SHORT SLEEVLES","BLACK","L"],"JS-0880-50201-S":["AYLANI - LONG SLEEVLES","WHITE","S"],"JS-0880-50201-M":["AYLANI - LONG SLEEVLES","WHITE","M"],"JS-0880-50201-L":["AYLANI - LONG SLEEVLES","WHITE","L"],"JS-0881-50201-S":["HALO - LONG SLEEVLES","BLACK","S"],"JS-0881-50201-M":["HALO - LONG SLEEVLES","BLACK","M"],"JS-0881-50201-L":["HALO - LONG SLEEVLES","BLACK","L"],"JS-0882-50203-S":["DAINA","GREEN","S"],"JS-0882-50203-M":["DAINA","GREEN","M"],"JS-0882-50203-L":["DAINA","GREEN","L"],"JS-0882-50203-XL":["DAINA","GREEN","XL"],"JS-0883-50203-S":["INAYA","BLUE","S"],"JS-0883-50203-M":["INAYA","BLUE","M"],"JS-0883-50203-L":["INAYA","BLUE","L"],"JS-0883-50203-XL":["INAYA","BLUE","XL"],"JS-0884-50065-S":["KORALLION","PRINTED","S"],"JS-0884-50065-M":["KORALLION","PRINTED","M"],"JS-0884-50065-L":["KORALLION","PRINTED","L"],"JS-0885-50065-S":["LIBERTY","PRINTED","S"],"JS-0885-50065-M":["LIBERTY","PRINTED","M"],"JS-0885-50065-L":["LIBERTY","PRINTED","L"],"JS-0886-8027-S":["KORALLION","PRINTED","S"],"JS-0886-8027-M":["KORALLION","PRINTED","M"],"JS-0886-8027-L":["KORALLION","PRINTED","L"],"JS-0887-8027-S":["LIBERTY","PRINTED","S"],"JS-0887-8027-M":["LIBERTY","PRINTED","M"],"JS-0887-8027-L":["LIBERTY","PRINTED","L"],"JS-0888-50219-S":["ELENA","PRINTED","S"],"JS-0888-50219-M":["ELENA","PRINTED","M"],"JS-0888-50219-L":["ELENA","PRINTED","L"],"JS-0890-50216-S":["CANDACE","WHITE","S"],"JS-0890-50216-M":["CANDACE","WHITE","M"],"JS-0890-50216-L":["CANDACE","WHITE","L"],"JS-0890-50216-XL":["CANDACE","WHITE","XL"],"JS-0891-50216-S":["AALIYAH","BLACK","S"],"JS-0891-50216-M":["AALIYAH","BLACK","M"],"JS-0891-50216-L":["AALIYAH","BLACK","L"],"JS-0891-50216-XL":["AALIYAH","BLACK","XL"],"JS-0892-50011-S":["CANDACE","WHITE","S"],"JS-0892-50011-M":["CANDACE","WHITE","M"],"JS-0892-50011-L":["CANDACE","WHITE","L"],"JS-0893-50011-S":["AALIYAH","BLACK","S"],"JS-0893-50011-M":["AALIYAH","BLACK","M"],"JS-0893-50011-L":["AALIYAH","BLACK","L"],"JS-0894-50057-S":["CANDACE","WHITE","S"],"JS-0894-50057-M":["CANDACE","WHITE","M"],"JS-0894-50057-L":["CANDACE","WHITE","L"],"JS-0895-50057-S":["AALIYAH","BLACK","S"],"JS-0895-50057-M":["AALIYAH","BLACK","M"],"JS-0895-50057-L":["AALIYAH","BLACK","L"],"JS-0896-50010-S":["EVOLET (SHOR SLEEVLES)","PRINTED","S"],"JS-0896-50010-M":["EVOLET (SHOR SLEEVLES)","PRINTED","M"],"JS-0896-50010-L":["EVOLET (SHOR SLEEVLES)","PRINTED","L"],"JS-0897-8563-S":["EVOLET (U BACK)","PRINTED","S"],"JS-0897-8563-M":["EVOLET (U BACK)","PRINTED","M"],"JS-0897-8563-L":["EVOLET (U BACK)","PRINTED","L"],"JS-0898-50067-S":["EVOLET (LONG SLEEVLES)","PRINTED","S"],"JS-0898-50067-M":["EVOLET (LONG SLEEVLES)","PRINTED","M"],"JS-0898-50067-L":["EVOLET (LONG SLEEVLES)","PRINTED","L"],"JS-0899-8235-S":["EVOLET","PRINTED","S"],"JS-0899-8235-M":["EVOLET","PRINTED","S"],"JS-0899-8235-L":["EVOLET","PRINTED","S"],"JS-0900-160402-S":["EVOLET","PRINTED","S"],"JS-0900-160402-M":["EVOLET","PRINTED","M"],"JS-0900-160402-L":["EVOLET","PRINTED","L"],"JS-0900-160402-XL":["EVOLET","PRINTED","XL"],"JS-0903-8028-S":["EVOLET (BASIC TOP)","PRINTED","S"],"JS-0903-8028-M":["EVOLET (BASIC TOP)","PRINTED","M"],"JS-0903-8028-L":["EVOLET (BASIC TOP)","PRINTED","L"],"JS-0903-8028-XL":["EVOLET (BASIC TOP)","PRINTED","XL"],"JS-0905-10808-S":["EVOLET ","PRINTED","S"],"JS-0905-10808-M":["EVOLET ","PRINTED","M"],"JS-0905-10808-L":["EVOLET ","PRINTED","L"],"JS-0905-10808-XL":["EVOLET ","PRINTED","XL"],"JS-0906-8638-S":["ISAIAH","BLACK","S"],"JS-0906-8638-M":["ISAIAH","BLACK","M"],"JS-0906-8638-L":["ISAIAH","BLACK","L"],"JS-0906-8638-XL":["ISAIAH","BLACK","XL"],"JS-0907-8638-S":["LUNE","BEIGE","S"],"JS-0907-8638-M":["LUNE","BEIGE","M"],"JS-0907-8638-L":["LUNE","BEIGE","L"],"JS-0907-8638-XL":["LUNE","BEIGE","XL"],"JS-0910-8638-S":["GOLDIE","RED","S"],"JS-0910-8638-M":["GOLDIE","RED","M"],"JS-0910-8638-L":["GOLDIE","RED","L"],"JS-0910-8638-XL":["GOLDIE","RED","XL"],"JS-0914-50222-XS":["FELACIA","PRINTED","XS"],"JS-0914-50222-S":["FELACIA","PRINTED","S"],"JS-0914-50222-M":["FELACIA","PRINTED","M"],"JS-0914-50222-L":["FELACIA","PRINTED","L"],"JS-0917-50198B-S":["ENSLEY","WHITE","S"],"JS-0917-50198B-M":["ENSLEY","WHITE","M"],"JS-0917-50198B-L":["ENSLEY","WHITE","L"],"JS-0918-50198B-S":["FLAVIA","YELLOW","S"],"JS-0918-50198B-M":["FLAVIA","YELLOW","M"],"JS-0918-50198B-L":["FLAVIA","YELLOW","L"],"JS-0919-50198B-S":["IVY","BLUE","S"],"JS-0919-50198B-M":["IVY","BLUE","M"],"JS-0919-50198B-L":["IVY","BLUE","L"],"JS-51007-8030-S":["CALEE","PRINTED","S"],"JS-51007-8030-M":["CALEE","PRINTED","M"],"JS-51007-8030-L":["CALEE","PRINTED","L"],"JS-51007-8030-XL":["CALEE","PRINTED","XL"],"JS-51008-8030-S":["KASPIAN","PRINTED","S"],"JS-51008-8030-M":["KASPIAN","PRINTED","M"],"JS-51008-8030-L":["KASPIAN","PRINTED","L"],"JS-51008-8030-XL":["KASPIAN","PRINTED","XL"],"JS-51009-50211-S":["CHARLOTTE","PRINTED","S"],"JS-51009-50211-M":["CHARLOTTE","PRINTED","M"],"JS-51009-50211-L":["CHARLOTTE","PRINTED","L"],"JS-51009-50211-XL":["CHARLOTTE","PRINTED","XL"],"JS-51010-50211-S":["WILLOW","PRINTED","S"],"JS-51010-50211-M":["WILLOW","PRINTED","M"],"JS-51010-50211-L":["WILLOW","PRINTED","L"],"JS-51010-50211-XL":["WILLOW","PRINTED","XL"],"JS-51011-50010-S":["HARPER","PRINTED","S"],"JS-51011-50010-M":["HARPER","PRINTED","M"],"JS-51011-50010-L":["HARPER","PRINTED","L"],"JS-51012-50010-S":["MACIE","PRINTED","S"],"JS-51012-50010-M":["MACIE","PRINTED","M"],"JS-51012-50010-L":["MACIE","PRINTED","L"],"JS-51013-8028-S":["HARPER (BASIC TOP)","PRINTED","S"],"JS-51013-8028-M":["HARPER (BASIC TOP)","PRINTED","M"],"JS-51013-8028-L":["HARPER (BASIC TOP)","PRINTED","L"],"JS-51013-8028-XL":["HARPER (BASIC TOP)","PRINTED","XL"],"JS-51017-160402-S":["MACIE","PRINTED","S"],"JS-51017-160402-M":["MACIE","PRINTED","M"],"JS-51017-160402-L":["MACIE","PRINTED","L"],"JS-51017-160402-XL":["MACIE","PRINTED","XL"],"JS-51018-160402-S":["HARPER","PRINTED","S"],"JS-51018-160402-M":["HARPER","PRINTED","M"],"JS-51018-160402-L":["HARPER","PRINTED","L"],"JS-51018-160402-XL":["HARPER","PRINTED","XL"],"JS-51019-8103-S":["LIAM","ARMY GREEN","S"],"JS-51019-8103-M":["LIAM","ARMY GREEN","M"],"JS-51019-8103-L":["LIAM","ARMY GREEN","L"],"JS-51019-8103-XL":["LIAM","ARMY GREEN","XL"],"JS-51020-8103-S":["MATEO","LT BLUE","S"],"JS-51020-8103-M":["MATEO","LT BLUE","M"],"JS-51020-8103-L":["MATEO","LT BLUE","L"],"JS-51020-8103-XL":["MATEO","LT BLUE","XL"],"JS-51021-8103-S":["OLIVER","BROWN","S"],"JS-51021-8103-M":["OLIVER","BROWN","M"],"JS-51021-8103-L":["OLIVER","BROWN","L"],"JS-51021-8103-XL":["OLIVER","BROWN","XL"],"JS-51026-50178-S":["JONQUIL","YELLOW","S"],"JS-51026-50178-M":["JONQUIL","YELLOW","M"],"JS-51026-50178-L":["JONQUIL","YELLOW","L"],"JS-51027-50178-S":["KIMM","GREEN","S"],"JS-51027-50178-M":["KIMM","GREEN","M"],"JS-51027-50178-L":["KIMM","GREEN","L"],"JS-51028-50221-S":["MANAIA","PRINTED","S"],"JS-51028-50221-M":["MANAIA","PRINTED","M"],"JS-51028-50221-L":["MANAIA","PRINTED","L"],"JS-51029-50221-S":["EMELY","PRINTED","S"],"JS-51029-50221-M":["EMELY","PRINTED","M"],"JS-51029-50221-L":["EMELY","PRINTED","L"],"JS-51030-160402-S":["EMELY","PRINTED","S"],"JS-51030-160402-M":["EMELY","PRINTED","M"],"JS-51030-160402-L":["EMELY","PRINTED","L"],"JS-51031-160402-S":["MANAIA","PRINTED","S"],"JS-51031-160402-M":["MANAIA","PRINTED","M"],"JS-51031-160402-L":["MANAIA","PRINTED","L"],"JS-51032-8369X-S":["ESTHER","GREEN","S"],"JS-51032-8369X-M":["ESTHER","GREEN","M"],"JS-51032-8369X-L":["ESTHER","GREEN","L"],"JS-51032-8369X-XL":["ESTHER","GREEN","XL"],"JS-51033-8369X-S":["LEAH","PINK","S"],"JS-51033-8369X-M":["LEAH","PINK","M"],"JS-51033-8369X-L":["LEAH","PINK","L"],"JS-51033-8369X-XL":["LEAH","PINK","XL"],"JS-51034-8369X-S":["EMALEE","BLUE","S"],"JS-51034-8369X-M":["EMALEE","BLUE","M"],"JS-51034-8369X-L":["EMALEE","BLUE","L"],"JS-51034-8369X-XL":["EMALEE","BLUE","XL"],"JS-51036-500059-S":["BOHO","PRINTED","S"],"JS-51036-500059-M":["BOHO","PRINTED","M"],"JS-51036-500059-L":["BOHO","PRINTED","L"],"JS-51036-500059-XL":["BOHO","PRINTED","XL"],"JS-51037-500059-S":["ZYAIRE","PRINTED","S"],"JS-51037-500059-M":["ZYAIRE","PRINTED","M"],"JS-51037-500059-L":["ZYAIRE","PRINTED","L"],"JS-51037-500059-XL":["ZYAIRE","PRINTED","XL"],"JS-51038-500059-S":["HAYDEN","WHITE","S"],"JS-51038-500059-M":["HAYDEN","WHITE","M"],"JS-51038-500059-L":["HAYDEN","WHITE","L"],"JS-51038-500059-XL":["HAYDEN","WHITE","XL"],"JS-51039-500059-S":["TAARA","BLACK","S"],"JS-51039-500059-M":["TAARA","BLACK","M"],"JS-51039-500059-L":["TAARA","BLACK","L"],"JS-51039-500059-XL":["TAARA","BLACK","XL"],"JS-51040-50203A-S":["BOHO","PRINTED","S"],"JS-51040-50203A-M":["BOHO","PRINTED","M"],"JS-51040-50203A-L":["BOHO","PRINTED","L"],"JS-51040-50203A-XL":["BOHO","PRINTED","XL"],"JS-51041-50203A-S":["ZYAIRE","PRINTED","S"],"JS-51041-50203A-M":["ZYAIRE","PRINTED","M"],"JS-51041-50203A-L":["ZYAIRE","PRINTED","L"],"JS-51041-50203A-XL":["ZYAIRE","PRINTED","XL"],"JS-51042-10925-S":["TASHANA","PURPLE BLUE","S"],"JS-51042-10925-M":["TASHANA","PURPLE BLUE","M"],"JS-51042-10925-L":["TASHANA","PURPLE BLUE","L"],"JS-51042-10925-XL":["TASHANA","PURPLE BLUE","XL"],"JS-51043-10925-S":["AURELIA","PURPLE BLUE","S"],"JS-51043-10925-M":["AURELIA","PURPLE BLUE","M"],"JS-51043-10925-L":["AURELIA","PURPLE BLUE","L"],"JS-51043-10925-XL":["AURELIA","PURPLE BLUE","XL"],"JS-51043-50010-S":["ROSEANNE","PINK","S"],"JS-51043-50010-M":["ROSEANNE","PINK","M"],"JS-51043-50010-L":["ROSEANNE","PINK","L"],"JS-51043-50010-XL":["ROSEANNE","PINK","XL"],"JS-51044-50010-S":["NOAH","WHIITE","S"],"JS-51044-50010-M":["NOAH","WHIITE","M"],"JS-51044-50010-L":["NOAH","WHIITE","L"],"JS-51044-50010-XL":["NOAH","WHIITE","XL"],"JS-51046-50302-S":["KORA","ORANGE","S"],"JS-51046-50302-M":["KORA","ORANGE","M"],"JS-51046-50302-L":["KORA","ORANGE","L"],"JS-51047-50302-S":["LAILA","BLACK","S"],"JS-51047-50302-M":["LAILA","BLACK","M"],"JS-51047-50302-L":["LAILA","BLACK","L"],"JS-51048-8028-S":["ZEPHYR","PRINTED","S"],"JS-51048-8028-M":["ZEPHYR","PRINTED","M"],"JS-51048-8028-L":["ZEPHYR","PRINTED","L"],"JS-51048-8028-XL":["ZEPHYR","PRINTED","XL"],"JS-51050-50293-S":["KNIGHT","WHITE","S"],"JS-51050-50293-M":["KNIGHT","WHITE","M"],"JS-51050-50293-L":["KNIGHT","WHITE","L"],"JS-51051-50293-S":["SOPHIA","PRINTED","S"],"JS-51051-50293-M":["SOPHIA","PRINTED","M"],"JS-51051-50293-L":["SOPHIA","PRINTED","L"],"JS-51052-50307-S":["ARINA","PRINTED","S"],"JS-51052-50307-M":["ARINA","PRINTED","M"],"JS-51052-50307-L":["ARINA","PRINTED","L"],"JS-51052-50307-XL":["ARINA","PRINTED","XL"],"JS-51053-50307-S":["RORY","RED","S"],"JS-51053-50307-M":["RORY","RED","M"],"JS-51053-50307-L":["RORY","RED","L"],"JS-51053-50307-XL":["RORY","RED","XL"],"JS-51054-50306-S":["KAI","GREEN","S"],"JS-51054-50306-M":["KAI","GREEN","M"],"JS-51054-50306-L":["KAI","GREEN","L"],"JS-51055-50306-S":["EMILAE","YELLOW","S"],"JS-51055-50306-M":["EMILAE","YELLOW","M"],"JS-51055-50306-L":["EMILAE","YELLOW","L"],"JS-51056-50219-S":["BURCHELL (ZEBRA)","WHITE","S"],"JS-51056-50219-M":["BURCHELL (ZEBRA)","WHITE","M"],"JS-51056-50219-L":["BURCHELL (ZEBRA)","WHITE","L"],"JS-51057-50219-S":["ELLIS (GIRAFFE)","WHITE","S"],"JS-51057-50219-M":["ELLIS (GIRAFFE)","WHITE","M"],"JS-51057-50219-L":["ELLIS (GIRAFFE)","WHITE","L"],"JS-51058-50316-S":["FLYNN","BEIGE","S"],"JS-51058-50316-M":["FLYNN","BEIGE","M"],"JS-51058-50316-L":["FLYNN","BEIGE","L"],"JS-51058-50316-XL":["FLYNN","BEIGE","XL"],"JS-51059-50316-S":["KORI","BROWN","S"],"JS-51059-50316-M":["KORI","BROWN","M"],"JS-51059-50316-L":["KORI","BROWN","L"],"JS-51059-50316-XL":["KORI","BROWN","XL"],"JS-51060-50316-S":["JULIEN","GREEN","S"],"JS-51060-50316-M":["JULIEN","GREEN","M"],"JS-51060-50316-L":["JULIEN","GREEN","L"],"JS-51060-50316-XL":["JULIEN","GREEN","XL"],"JS-51062-50317-S":["ANDERSON","BEIGE","S"],"JS-51062-50317-M":["ANDERSON","BEIGE","M"],"JS-51062-50317-L":["ANDERSON","BEIGE","L"],"JS-51062-50317-XL":["ANDERSON","BEIGE","XL"],"JS-51061-50317-S":["ADLEY","WHITE","S"],"JS-51061-50317-M":["ADLEY","WHITE","M"],"JS-51061-50317-L":["ADLEY","WHITE","L"],"JS-51061-50317-XL":["ADLEY","WHITE","XL"],"JS-51063-50317-S":["RAYNE","RED","S"],"JS-51063-50317-M":["RAYNE","RED","M"],"JS-51063-50317-L":["RAYNE","RED","L"],"JS-51063-50317-XL":["RAYNE","RED","XL"],"JS-51064-50317-S":["MARIEL","BLACK","S"],"JS-51064-50317-M":["MARIEL","BLACK","M"],"JS-51064-50317-L":["MARIEL","BLACK","L"],"JS-51064-50317-XL":["MARIEL","BLACK","XL"],"JS-51065-8096-S":["ANNIKA","PRINTED","S"],"JS-51065-8096-M":["ANNIKA","PRINTED","M"],"JS-51065-8096-L":["ANNIKA","PRINTED","L"],"JS-51068-8030-S":["MAHINA","PRINTED","S"],"JS-51068-8030-M":["MAHINA","PRINTED","M"],"JS-51068-8030-L":["MAHINA","PRINTED","L"],"JS-51069-8030-S":["KALEA","PRINTED","S"],"JS-51069-8030-M":["KALEA","PRINTED","M"],"JS-51069-8030-L":["KALEA","PRINTED","L"],"JS-51076-50285-S":["RANI","WHITE","S"],"JS-51076-50285-M":["RANI","WHITE","M"],"JS-51076-50285-L":["RANI","WHITE","L"],"JS-51077-50287-S":["MALKA SHIRT","GREEN","S"],"JS-51077-50287-M":["MALKA SHIRT","GREEN","M"],"JS-51077-50287-L":["MALKA SHIRT","GREEN","L"],"JS-51078-50288-S":["JUNO","DENIM","S"],"JS-51078-50288-M":["JUNO","DENIM","M"],"JS-51078-50288-L":["JUNO","DENIM","L"],"JS-51079-50308-S":["CLARA DK","DK BLUE","S"],"JS-51079-50308-M":["CLARA DK","DK BLUE","M"],"JS-51079-50308-L":["CLARA DK","DK BLUE","L"],"JS-51079-50308-XL":["CLARA DK","DK BLUE","XL"],"JS-51080-50308-S":["CLARA MD","MD BLUE","S"],"JS-51080-50308-M":["CLARA MD","MD BLUE","M"],"JS-51080-50308-L":["CLARA MD","MD BLUE","L"],"JS-51080-50308-XL":["CLARA MD","MD BLUE","XL"],"JS-51081-8369X-S":["GOLDIE","RED","S"],"JS-51081-8369X-M":["ROWAN","BROWN","M"],"JS-51081-8369X-L":["ROWAN","BROWN","L"],"JS-51081-8369X-XL":["ROWAN","BROWN","XL"],"JS-51082-8369X-S":["ROWAN","BROWN","S"],"JS-51083-8369X-S":["LUCIA","LT GREEN","S"],"JS-51083-8369X-M":["LUCIA","LT GREEN","M"],"JS-51083-8369X-L":["LUCIA","LT GREEN","L"],"JS-51083-8369X-XL":["LUCIA","LT GREEN","XL"],"JS-51084-50215-S":["PERLA","YELLOW","S"],"JS-51084-50215-M":["PERLA","YELLOW","M"],"JS-51084-50215-L":["PERLA","YELLOW","L"],"JS-51084-50215-XL":["PERLA","YELLOW","XL"],"JS-51085-50215-S":["JIANA","PINK","S"],"JS-51085-50215-M":["JIANA","PINK","M"],"JS-51085-50215-L":["JIANA","PINK","L"],"JS-51085-50215-XL":["JIANA","PINK","XL"]};
+
+var SUBMIT_URL = "https://script.google.com/macros/s/AKfycbxMh96egS2g1gTbVe2vJezA6CT4WQpBQraU5w428KOeaSKKSsqQcZsF4hJxmjcv3fZbNg/exec";
+
+var counterSelect = document.getElementById('counterSelect');
+var scanToggle = document.getElementById('scanToggle');
+var scanToggleLabel = document.getElementById('scanToggleLabel');
+var readerWrap = document.getElementById('readerWrap');
+var camStatus = document.getElementById('camStatus');
+var listEl = document.getElementById('list');
+var emptyState = document.getElementById('emptyState');
+var listCount = document.getElementById('listCount');
+var totalQty = document.getElementById('totalQty');
+var submitBtn = document.getElementById('submitBtn');
+var flashEl = document.getElementById('flash');
+var toastEl = document.getElementById('toast');
+var manualInput = document.getElementById('manualInput');
+var manualAddBtn = document.getElementById('manualAddBtn');
+var modeSellBtn = document.getElementById('modeSellBtn');
+var modeStockinBtn = document.getElementById('modeStockinBtn');
+var emptyHint = document.getElementById('emptyHint');
+
+var mode = 'sell';
+var scanned = [];
+var html5Qrcode = null;
+var scanning = false;
+var lastCode = '';
+var lastCodeAt = 0;
+var submitting = false;
+
+function showToast(msg, isErr){
+  toastEl.textContent = msg;
+  toastEl.className = 'toast show' + (isErr ? ' err' : '');
+  clearTimeout(showToast._t);
+  showToast._t = setTimeout(function(){ toastEl.className = 'toast'; }, 2200);
+}
+
+function beep(){
+  try{
+    var ctx = beep._ctx || (beep._ctx = new (window.AudioContext || window.webkitAudioContext)());
+    var o = ctx.createOscillator(), g = ctx.createGain();
+    o.frequency.value = 880; o.type = 'sine';
+    g.gain.setValueAtTime(0.0001, ctx.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.25, ctx.currentTime + 0.01);
+    g.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.12);
+    o.connect(g); g.connect(ctx.destination);
+    o.start(); o.stop(ctx.currentTime + 0.13);
+  }catch(e){}
+}
+
+function flash(){
+  flashEl.classList.add('on');
+  setTimeout(function(){ flashEl.classList.remove('on'); }, 120);
+}
+
+function render(){
+  listEl.innerHTML = '';
+  emptyState.style.display = scanned.length ? 'none' : 'block';
+  var total = 0;
+  scanned.forEach(function(it, idx){
+    total += it.qty;
+    var row = document.createElement('div');
+    row.className = 'item-row';
+    var sub = it.unknown
+      ? '<span class="barcode mono">' + it.barcode + '</span><span class="unknown-tag">Not in catalogue</span>'
+      : (it.colour + ' · ' + it.size + ' · <span class="barcode mono">' + it.barcode + '</span>');
+    row.innerHTML =
+      '<div class="item-info">' +
+        '<div class="item-name">' + (it.unknown ? it.barcode : it.style) + '</div>' +
+        '<div class="item-sub">' + sub + '</div>' +
+      '</div>' +
+      '<div class="qty-stepper">' +
+        '<button type="button" data-act="minus" data-idx="' + idx + '" aria-label="Decrease">−</button>' +
+        '<span class="qty-val mono">' + it.qty + '</span>' +
+        '<button type="button" data-act="plus" data-idx="' + idx + '" aria-label="Increase">+</button>' +
+      '</div>' +
+      '<button type="button" class="remove-btn" data-act="remove" data-idx="' + idx + '" aria-label="Remove">' +
+        '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>' +
+      '</button>';
+    listEl.appendChild(row);
+  });
+  listCount.textContent = scanned.length + (scanned.length === 1 ? ' line' : ' lines');
+  totalQty.textContent = total;
+  submitBtn.disabled = scanned.length === 0 || submitting;
+}
+
+listEl.addEventListener('click', function(e){
+  var btn = e.target.closest('button[data-act]');
+  if (!btn) return;
+  var idx = parseInt(btn.getAttribute('data-idx'), 10);
+  var act = btn.getAttribute('data-act');
+  if (act === 'plus') scanned[idx].qty++;
+  else if (act === 'minus') { scanned[idx].qty--; if (scanned[idx].qty <= 0) scanned.splice(idx, 1); }
+  else if (act === 'remove') scanned.splice(idx, 1);
+  render();
+});
+
+function addScan(barcode){
+  barcode = (barcode || '').trim();
+  if (!barcode) return;
+  var meta = ITEMS[barcode];
+  var existing = scanned.find(function(s){ return s.barcode === barcode; });
+  if (existing){
+    existing.qty++;
+  } else if (meta){
+    scanned.push({ barcode: barcode, style: meta[0], colour: meta[1], size: meta[2], qty: 1, unknown: false });
+  } else {
+    scanned.push({ barcode: barcode, style: '', colour: '', size: '', qty: 1, unknown: true });
+  }
+  render();
+  beep();
+  flash();
+  var added = ITEMS[barcode] ? ITEMS[barcode][0] : barcode;
+  showToast('Added: ' + added);
+}
+
+manualAddBtn.addEventListener('click', function(){
+  if (manualInput.value.trim()){ addScan(manualInput.value); manualInput.value = ''; }
+});
+manualInput.addEventListener('keydown', function(e){
+  if (e.key === 'Enter'){ e.preventDefault(); manualAddBtn.click(); }
+});
+
+function onDecoded(decodedText){
+  var now = Date.now();
+  if (decodedText === lastCode && (now - lastCodeAt) < 1500) return;
+  lastCode = decodedText; lastCodeAt = now;
+  addScan(decodedText);
+}
+
+function startScanning(){
+  if (!counterSelect.value){ showToast('Choose a counter first', true); return; }
+  readerWrap.classList.add('active');
+  html5Qrcode = new Html5Qrcode('reader', { verbose: false });
+  var config = { fps: 10, qrbox: { width: 260, height: 160 }, aspectRatio: 1.6 };
+  camStatus.textContent = 'Starting camera…';
+  html5Qrcode.start(
+    { facingMode: 'environment' },
+    config,
+    onDecoded,
+    function(){ /* per-frame decode errors: ignore */ }
+  ).then(function(){
+    scanning = true;
+    camStatus.textContent = 'Camera live';
+    camStatus.classList.add('live');
+    scanToggle.classList.add('stop');
+    scanToggleLabel.textContent = 'Stop scanning';
+  }).catch(function(err){
+    readerWrap.classList.remove('active');
+    camStatus.textContent = 'Camera off';
+    showToast('Could not open camera — check camera permission for this page', true);
+  });
+}
+
+function stopScanning(){
+  if (html5Qrcode){
+    html5Qrcode.stop().then(function(){
+      html5Qrcode.clear();
+      html5Qrcode = null;
+    }).catch(function(){ html5Qrcode = null; });
+  }
+  scanning = false;
+  readerWrap.classList.remove('active');
+  camStatus.textContent = 'Camera off';
+  camStatus.classList.remove('live');
+  scanToggle.classList.remove('stop');
+  scanToggleLabel.textContent = 'Start scanning';
+}
+
+scanToggle.addEventListener('click', function(){
+  if (scanning) stopScanning(); else startScanning();
+});
+
+counterSelect.addEventListener('change', function(){
+  scanToggle.disabled = !counterSelect.value;
+  if (!scanning) scanToggleLabel.textContent = counterSelect.value ? 'Start scanning' : 'Select a counter to start';
+});
+
+function setMode(newMode){
+  if (newMode === mode) return;
+  if (scanned.length && !confirm('Switch mode? This clears your current unsaved list.')) return;
+  mode = newMode;
+  scanned = [];
+  modeSellBtn.classList.toggle('active', mode === 'sell');
+  modeStockinBtn.classList.toggle('active', mode === 'stockin');
+  emptyHint.innerHTML = mode === 'stockin'
+    ? 'Doing a stock count? Scan each item as you count it — each scan adds a line below.<br>This ADDS to stock, it does not replace it.'
+    : 'Point the camera at a tag barcode — each scan adds a line below.<br>Sell 20 pieces? Scan all 20, then submit once.';
+  submitBtn.textContent = mode === 'stockin' ? 'Add to stock' : 'Submit all';
+  render();
+}
+modeSellBtn.addEventListener('click', function(){ setMode('sell'); });
+modeStockinBtn.addEventListener('click', function(){ setMode('stockin'); });
+
+submitBtn.addEventListener('click', function(){
+  if (!scanned.length || submitting) return;
+  if (!counterSelect.value){ showToast('Choose a counter first', true); return; }
+  submitting = true;
+  submitBtn.disabled = true;
+  var busyLabel = mode === 'stockin' ? 'Adding…' : 'Submitting…';
+  var idleLabel = mode === 'stockin' ? 'Add to stock' : 'Submit all';
+  submitBtn.textContent = busyLabel;
+  var payload = {
+    counter: counterSelect.value,
+    mode: mode,
+    items: scanned.map(function(s){ return { barcode: s.barcode, qty: s.qty }; })
+  };
+  fetch(SUBMIT_URL, { method: 'POST', body: JSON.stringify(payload) })
+    .then(function(r){ return r.json(); })
+    .then(function(res){
+      submitting = false;
+      submitBtn.textContent = idleLabel;
+      if (res && res.success){
+        var total = payload.items.reduce(function(a,b){return a+b.qty;},0);
+        showToast((mode === 'stockin' ? 'Added ' : 'Submitted ') + total + ' pieces ' + (mode === 'stockin' ? 'to stock at ' : 'to ') + payload.counter);
+        scanned = [];
+        render();
+      } else {
+        showToast((res && res.error) || 'Submit failed — try again', true);
+        render();
+      }
+    })
+    .catch(function(){
+      submitting = false;
+      submitBtn.textContent = idleLabel;
+      showToast('No connection — try again', true);
+      render();
+    });
+});
+
+render();
+</script>
+</body>
+</html>
